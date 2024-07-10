@@ -1,0 +1,145 @@
+@top Template { Input* }
+
+Input {
+  Text | Directive 
+}
+
+Directive {
+  Expression | EscapedExpression | Block | Comment
+}
+
+// If blocks can have an optional else block, kinda cheating here by allowing just another BlockOpen
+Block {
+  ConditionalOpen Input* (ConditionalElse Input*)? ClosingBlock<"if"> |
+  InverseConditionalOpen Input* (ConditionalElse Input*)? ClosingBlock<"unless"> |
+  EachBlockOpen Input* ClosingBlock<"each"> |
+  WithBlockOpen Input* ClosingBlock<"with">
+}
+
+// some blocks allow aliasing the current context with 'as'
+ClosingBlock<keyword> { 
+  OpeneningMustache BlockCloseDelim kw<keyword> ClosingMustache
+}
+
+ConditionalOpen {
+  OpeneningMustache BlockOpenDelim kw<"if"> Space ResolvableItem Space? ClosingMustache
+}
+ConditionalElse {
+  OpeneningMustache Space? kw<"else"> Space? ClosingMustache
+}
+InverseConditionalOpen {
+  OpeneningMustache BlockOpenDelim kw<"unless"> Space ResolvableItem Space? ClosingMustache
+}
+BlockAlias {
+  // Require all spaces to separate characters
+  Space "as" Space "|" Space Identifier Space "|"
+}
+
+EachBlockOpen {
+  OpeneningMustache BlockOpenDelim kw<"each"> Space ResolvableItem BlockAlias? Space? ClosingMustache
+}
+
+WithBlockOpen {
+  OpeneningMustache BlockOpenDelim kw<"with"> Space ResolvableItem BlockAlias? Space? ClosingMustache
+}
+
+Expression { 
+  OpeneningMustache Space? ResolvableItem Space? ClosingMustache
+}
+
+EscapedExpression {
+  TripleOpeneningMustache Space? ResolvableItem Space? TripleClosingMustache
+}
+
+ResolvableItem {
+  VariableIdentifier | FunctionCall | Boolean 
+}
+
+// Variable reference (path to a value, similar to JS object path)
+// identifier or optional path (0-n levels deep)
+VariableIdentifier {
+  Identifier ("." (Identifier | Number) )*
+}
+
+FunctionCall {
+  "(" FunctionName Space? FunctionParameter ")" // function call with 0-n arguments
+}
+
+// Params must have whitespace between; we don't want to skip whitespace when parsing params
+// in case we need to differentiate between primitives and variableIdentifiers
+FunctionParameter {
+  (Primitive | VariableIdentifier) (Space FunctionParameter)?
+}
+
+// Defining as a separate item to allow for different syntax highlighting
+FunctionName {
+  Identifier
+}
+
+Primitive {
+  Number | String | Boolean
+}
+
+// =================
+// Terminal items 
+// =================
+kw<word> { @specialize[@name={word}]<Identifier, word> }
+
+@tokens { 
+  // 'else' is a special case of the block, which optionally allows two block contents 
+  BlockOpenDelim { 
+    "#"
+  }
+  BlockCloseDelim {
+    "/"
+  }
+  
+  Identifier {
+    $[_a-zA-Z] $[_a-zA-Z0-9]* // Identifier: starts with a letter or underscore, followed by letters, numbers, or underscores
+  }
+
+  @precedence { Number, Text }
+  Number { 
+    @digit+ // Number: one or more digits
+  }
+
+  // Similar to text, but should be contained in "...", we'll ignore everything in the quotes
+  String {
+    "\"" !["]* "\""
+  }
+  
+  Text { 
+    ![{<] Text? | "{" (@eof | ![{] Text?) | "<" (@eof | ![-] Text?) // Matches any characters until a {{ is found
+  }
+
+  @precedence { Boolean, Text } // always try to match keywords first
+  Boolean { 
+    "true" | "false" 
+  }
+
+  @precedence { Comment, Text } // Try to match comment first
+  Comment {
+    StandardCommentStart Text StandardCommentEnd | HtmlCommentStart Text HtmlCommentEnd | EscapedCommentStart Text EscapedCommentEnd
+  }
+  
+  Space { @whitespace+ } // Whitespace: spaces, tabs, newlines, carriage returns (ignored)
+
+  // Define the mustaches as tokens (both 2 and 3 braces)
+  OpeneningMustache[closedBy="ClosingMustache"] { "{{" }
+  ClosingMustache[openedBy="OpeneningMustache"] { "}}" }
+  TripleOpeneningMustache[closedBy="TripleClosingMustache"] { "{{{" }
+  TripleClosingMustache[openedBy="TripleOpeneningMustache"] { "}}}" }
+  
+  StandardCommentStart[closedBy="StandardCommentEnd"] { "{{!" }
+  StandardCommentEnd[openedBy="StandardCommentStart"] { "}}" }
+  HtmlCommentStart[closedBy="HtmlCommentEnd"] { "<!--" }
+  HtmlCommentEnd[openedBy="HtmlCommentStart"] { "-->" }
+  EscapedCommentStart[closedBy="EscapedCommentEnd"] { "{{!--" }
+  EscapedCommentEnd[openedBy="EscapedCommentStart"] { "--}}" }
+  @precedence { TripleOpeneningMustache, Comment, StandardCommentStart, OpeneningMustache }
+  @precedence { TripleClosingMustache, StandardCommentEnd, ClosingMustache }
+  
+  @precedence {
+    Space, Comment, BlockKeyword, BlockOpenDelim, BlockCloseDelim, Identifier, Boolean, Number
+  }
+}
